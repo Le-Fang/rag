@@ -1,0 +1,50 @@
+server:
+  http_port: 8080
+  read_timeout: 10s
+  write_timeout: 30s
+qdrant:
+  host: localhost
+  grpc_port: 6334
+  api_key: ""
+  use_tls: false
+embedders:
+  fake_1024:
+    provider: fake
+    dimensions: 1024
+    batch_size: 8
+  openai_3_large:
+    provider: openai_compatible
+    base_url: https://api.openai.com/v1
+    model: text-embedding-3-large
+    api_key: ${TEST_OPENAI_KEY}
+    dimensions: 1024
+    batch_size: 96
+    timeout: 30s
+reranker:
+  provider: fake
+  top_n: 10
+  max_candidates: 20
+  timeout: 15s
+retrieval:
+  mode: hybrid
+  ann_top_k: 50
+  lexical_top_k: 50
+  hnsw_ef: 100
+  rrf_k: 60
+  weights:
+    dense: 1.0
+    lexical: 1.0
+variants:
+  - name: fake_hdr
+    embedder: fake_1024
+    chunker: small_to_big_v1
+    header_strategy: title_context
+    params:
+      parent_tokens: 1200
+      child_tokens: 250
+      child_overlap: 50
+      lexical_tokenizer: bigram_v1
+      normalize_numerals: true
+      bm25_k1: 1.2
+      bm25_b: 0.75
+      bm25_avg_len: 250

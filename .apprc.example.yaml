@@ -1,0 +1,74 @@
+server:
+  http_port: 8080
+  read_timeout: 10s
+  write_timeout: 30s
+qdrant:
+  host: localhost
+  grpc_port: 6334
+  api_key: ""                     # empty for local
+  use_tls: false
+embedders:                        # named profiles — variants bind to these by key
+  openai_3_large:
+    provider: openai_compatible   # openai_compatible | cohere | fake
+    base_url: https://api.openai.com/v1
+    model: text-embedding-3-large
+    api_key: ${OPENAI_API_KEY}
+    dimensions: 1024              # Matryoshka truncation from native 3072
+    batch_size: 96
+    timeout: 30s
+  jina_v3:
+    provider: openai_compatible
+    base_url: https://api.jina.ai/v1
+    model: jina-embeddings-v3
+    api_key: ${JINA_API_KEY}
+    dimensions: 1024              # native
+    batch_size: 96
+    timeout: 30s
+  # offline/dev: no API keys needed — deterministic hashed vectors, no network.
+  # Point a variant's `embedder:` at this key and set reranker.provider: fake.
+  # fake_1024:
+  #   provider: fake
+  #   dimensions: 1024
+  #   batch_size: 8
+reranker:
+  provider: cohere_style          # cohere_style | tei | fake
+  # offline/dev: no API keys needed. NOT a quality-neutral passthrough — the fake
+  # REVERSES the order it is handed, so a rerank step is visible in tests instead
+  # of being indistinguishable from no rerank at all. Never read its output as a
+  # relevance signal.
+  # provider: fake                # (base_url/model/api_key unused)
+  # self-hosted, no API key: `make up` also starts bge-reranker-v2-m3 served by
+  # llama.cpp (docker compose service "reranker"); its /v1/rerank speaks the
+  # cohere_style wire format. Scores are raw logits (can be negative), not 0..1.
+  # base_url: http://localhost:8081/v1
+  # model: bge-reranker-v2-m3
+  # api_key: ""
+  base_url: https://api.jina.ai/v1
+  model: jina-reranker-v2-base-multilingual
+  api_key: ${RERANKER_API_KEY}
+  top_n: 10
+  max_candidates: 20              # cost ceiling, see §7
+  timeout: 15s
+retrieval:
+  mode: hybrid                    # dense | lexical | hybrid
+  ann_top_k: 50
+  lexical_top_k: 50
+  hnsw_ef: 100                    # per-request search param — no SET LOCAL dance
+  rrf_k: 60
+  weights:
+    dense: 1.0
+    lexical: 1.0
+variants:
+  - name: openai_3l_hdr
+    embedder: openai_3_large        # profile key from embedders:
+    chunker: small_to_big_v1
+    header_strategy: title_context  # none | title_context
+    params:
+      parent_tokens: 1200
+      child_tokens: 250
+      child_overlap: 50
+      lexical_tokenizer: bigram_v1
+      normalize_numerals: true
+      bm25_k1: 1.2
+      bm25_b: 0.75
+      bm25_avg_len: 250

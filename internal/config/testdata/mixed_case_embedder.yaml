@@ -1,0 +1,37 @@
+server:
+  http_port: 8080
+qdrant:
+  host: localhost
+  grpc_port: 6334
+embedders:
+  Fake_1024:
+    provider: fake
+    dimensions: 1024
+    batch_size: 8
+reranker:
+  provider: fake
+  top_n: 10
+  max_candidates: 20
+retrieval:
+  mode: hybrid
+  ann_top_k: 50
+  lexical_top_k: 50
+  hnsw_ef: 100
+  rrf_k: 60
+  weights:
+    dense: 1.0
+    lexical: 1.0
+variants:
+  - name: fake_hdr
+    embedder: FAKE_1024
+    chunker: small_to_big_v1
+    header_strategy: title_context
+    params:
+      parent_tokens: 1200
+      child_tokens: 250
+      child_overlap: 50
+      lexical_tokenizer: bigram_v1
+      normalize_numerals: true
+      bm25_k1: 1.2
+      bm25_b: 0.75
+      bm25_avg_len: 250

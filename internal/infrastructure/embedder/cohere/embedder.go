@@ -1,0 +1,91 @@
+// Package cohere adapts Cohere's non-OpenAI-shaped embed API (§9.1):
+// POST {base_url}/embed with texts + input_type, response nested under
+// embeddings.float.
+package cohere
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"time"
+
+	"poc-rag/internal/domain/chunk"
+	"poc-rag/internal/domain/embedding"
+	"poc-rag/internal/infrastructure/httpx"
+)
+
+type Options struct {
+	BaseURL    string
+	Model      string
+	APIKey     string
+	Dimensions int
+	BatchSize  int
+	Timeout    time.Duration
+}
+
+type Embedder struct {
+	opts   Options
+	client *httpx.Client
+}
+
+func New(opts Options) *Embedder {
+	if opts.BatchSize <= 0 {
+		opts.BatchSize = 96
+	}
+	if opts.Timeout <= 0 {
+		opts.Timeout = 30 * time.Second
+	}
+	return &Embedder{
+		opts:   opts,
+		client: httpx.New(&http.Client{Timeout: opts.Timeout}, 3, 200*time.Millisecond),
+	}
+}
+
+var _ embedding.EmbedderPort = (*Embedder)(nil)
+
+func (e *Embedder) Dimensions() int { return e.opts.Dimensions }
+func (e *Embedder) Model() string   { return e.opts.Model }
+
+func (e *Embedder) Embed(ctx context.Context, texts []string, kind embedding.Kind) ([][]float32, error) {
+	inputType := "search_document"
+	if kind == embedding.KindQuery {
+		inputType = "search_query"
+	}
+	// An empty api_key means the route needs no auth (self-hosted gateway, or a
+	// proxy that injects credentials). Omit the header rather than sending a
+	// bare "Bearer " — some gateways reject the malformed value. Mirrors
+	// rerankapi.Reranker.
+	headers := map[string]string{}
+	if e.opts.APIKey != "" {
+		headers["Authorization"] = "Bearer " + e.opts.APIKey
+	}
+	out := make([][]float32, 0, len(texts))
+	for start := 0; start < len(texts); start += e.opts.BatchSize {
+		batch := texts[start:min(start+e.opts.BatchSize, len(texts))]
+		req := map[string]any{
+			"model":           e.opts.Model,
+			"texts":           batch,
+			"input_type":      inputType,
+			"embedding_types": []string{"float"},
+		}
+		var resp struct {
+			Embeddings struct {
+				Float [][]float32 `json:"float"`
+			} `json:"embeddings"`
+		}
+		if err := e.client.PostJSON(ctx, e.opts.BaseURL+"/embed", headers, req, &resp); err != nil {
+			return nil, fmt.Errorf("cohere embed: %w", err)
+		}
+		if len(resp.Embeddings.Float) != len(batch) {
+			return nil, fmt.Errorf("cohere embed: got %d embeddings for %d inputs", len(resp.Embeddings.Float), len(batch))
+		}
+		for _, v := range resp.Embeddings.Float {
+			if len(v) != e.opts.Dimensions {
+				return nil, fmt.Errorf("cohere embed: model %s returned width %d, profile expects %d: %w",
+					e.opts.Model, len(v), e.opts.Dimensions, chunk.ErrDimensionMismatch)
+			}
+			out = append(out, v)
+		}
+	}
+	return out, nil
+}
